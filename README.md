@@ -1,29 +1,3 @@
----
-# DACS Connector
-
-This project is the main connector for the backend/BFF. Its function is to act as an intermediary between the different services and modules of the system, managing the communication, integration, and data processing necessary for the operation of the application.
-
-# ms-dacs-conector
-
-Microservice for connecting to external APIs
-
-## Objective
-![Alternative text](assets/infraestructura.png)
-
-## Configuration
-[See the infrastructure configuration (PDF)](assets/DACS-configuracion-de-infraestructura.pdf)
-
-# Run locally
-```
-mvn clean spring-boot:run
-```
-
-You can optionally add the parameter:
-
--P local
-
-```
-
 # Conector
 
 This is the **Conector** project for DACS2025.
