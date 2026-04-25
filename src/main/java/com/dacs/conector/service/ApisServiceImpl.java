@@ -3,8 +3,6 @@ package com.dacs.conector.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 
 import com.dacs.conector.api.client.PacienteClient;
 import com.dacs.conector.dto.PacienteDto;
@@ -123,6 +121,8 @@ public class ApisServiceImpl implements ApisService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
+        normalizeCreateUser(userDto);
+
         // Guardar los roles antes de enviar
         List<String> rolesToAssign = userDto.getRoles();
         
@@ -159,6 +159,38 @@ public class ApisServiceImpl implements ApisService {
             System.err.println("Error creando usuario: " + e.getResponseBodyAsString());
             throw new RuntimeException("Error al crear usuario en Keycloak: " + e.getMessage());
         }
+    }
+
+    private void normalizeCreateUser(KeycloakUserDto.Create userDto) {
+        if (userDto == null) {
+            throw new IllegalArgumentException("El usuario a crear no puede ser null");
+        }
+
+        if (userDto.getEmail() == null || userDto.getEmail().isBlank()) {
+            throw new IllegalArgumentException("El email es obligatorio para crear el usuario");
+        }
+
+        if (userDto.getUsername() == null || userDto.getUsername().isBlank()) {
+            userDto.setUsername(userDto.getEmail());
+        }
+
+        if (userDto.getCredentials() == null || userDto.getCredentials().isEmpty()) {
+            throw new IllegalArgumentException("Se requiere al menos una credencial de tipo password");
+        }
+
+        boolean hasPasswordCredential = userDto.getCredentials().stream()
+                .anyMatch(credential -> credential != null
+                        && credential.getType() != null
+                        && "password".equalsIgnoreCase(credential.getType())
+                        && credential.getValue() != null
+                        && !credential.getValue().isBlank());
+
+        if (!hasPasswordCredential) {
+            throw new IllegalArgumentException("La credencial de contraseña es obligatoria para iniciar sesión");
+        }
+
+        userDto.setEnabled(true);
+        userDto.setEmailVerified(true);
     }
 
     /**
