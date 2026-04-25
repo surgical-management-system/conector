@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
@@ -26,6 +27,8 @@ import lombok.AllArgsConstructor;
 @Service
 public class ApisServiceImpl implements ApisService {
 
+    private static final String LEGAJO_ATTRIBUTE = "legajo";
+
     @Autowired
     private PacienteClient pacienteClient;
 
@@ -38,6 +41,9 @@ public class ApisServiceImpl implements ApisService {
 
     @Value("${keycloak.realm}")
     private String keycloakRealm;
+
+    @Value("${ms.backend.url:http://localhost:9003/backend}")
+    private String backendBaseUrl;
 
     @Override
     public PacienteDto getPacientes(int cantidad, String nacionalidad) {
@@ -166,13 +172,22 @@ public class ApisServiceImpl implements ApisService {
             throw new IllegalArgumentException("El usuario a crear no puede ser null");
         }
 
+        String legajo = extractLegajo(userDto.getAttributes(), userDto.getUsername());
+        if (legajo == null || legajo.isBlank()) {
+            throw new IllegalArgumentException("El legajo es obligatorio para crear usuario");
+        }
+
+        if (!existsPersonalByLegajo(legajo)) {
+            throw new IllegalArgumentException("No existe personal con legajo=" + legajo);
+        }
+
         if (userDto.getEmail() == null || userDto.getEmail().isBlank()) {
             throw new IllegalArgumentException("El email es obligatorio para crear el usuario");
         }
 
-        if (userDto.getUsername() == null || userDto.getUsername().isBlank()) {
-            userDto.setUsername(userDto.getEmail());
-        }
+        // El username de Keycloak debe ser el legajo para mapearlo con Personal.legajo
+        userDto.setUsername(legajo);
+        upsertLegajoAttribute(userDto, legajo);
 
         if (userDto.getCredentials() == null || userDto.getCredentials().isEmpty()) {
             throw new IllegalArgumentException("Se requiere al menos una credencial de tipo password");
@@ -191,6 +206,65 @@ public class ApisServiceImpl implements ApisService {
 
         userDto.setEnabled(true);
         userDto.setEmailVerified(true);
+    }
+
+    private boolean existsPersonalByLegajo(String legajo) {
+        String url = backendBaseUrl + "/personal/existe-legajo?legajo={legajo}";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+        try {
+            ResponseEntity<Boolean> response = keycloakRestTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Boolean.class,
+                    legajo);
+            return Boolean.TRUE.equals(response.getBody());
+        } catch (HttpClientErrorException e) {
+            System.err.println("Error validando legajo en backend: " + e.getResponseBodyAsString());
+            return false;
+        } catch (Exception e) {
+            System.err.println("Error validando legajo en backend: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void normalizeUpdateUser(KeycloakUserDto.Update userDto) {
+        if (userDto == null) {
+            throw new IllegalArgumentException("El usuario a actualizar no puede ser null");
+        }
+
+        String legajo = extractLegajo(userDto.getAttributes(), userDto.getUsername());
+        if (legajo != null && !legajo.isBlank()) {
+            userDto.setUsername(legajo);
+            upsertLegajoAttribute(userDto, legajo);
+        }
+    }
+
+    private String extractLegajo(java.util.Map<String, List<String>> attributes, String usernameFallback) {
+        if (attributes != null) {
+            List<String> values = attributes.get(LEGAJO_ATTRIBUTE);
+            if (values != null && !values.isEmpty() && values.get(0) != null && !values.get(0).isBlank()) {
+                return values.get(0).trim();
+            }
+        }
+
+        if (usernameFallback != null && !usernameFallback.isBlank()) {
+            return usernameFallback.trim();
+        }
+
+        return null;
+    }
+
+    private void upsertLegajoAttribute(KeycloakUserDto userDto, String legajo) {
+        java.util.Map<String, List<String>> attributes = userDto.getAttributes();
+        if (attributes == null) {
+            attributes = new HashMap<>();
+            userDto.setAttributes(attributes);
+        }
+        attributes.put(LEGAJO_ATTRIBUTE, Collections.singletonList(legajo));
     }
 
     /**
@@ -277,6 +351,8 @@ public class ApisServiceImpl implements ApisService {
 
         // Guardar los roles antes de enviar (Keycloak no acepta el campo roles en update)
         List<String> rolesToAssign = userDto.getRoles();
+
+        normalizeUpdateUser(userDto);
         
         System.out.println("DEBUG - Roles a actualizar: " + rolesToAssign);
         
